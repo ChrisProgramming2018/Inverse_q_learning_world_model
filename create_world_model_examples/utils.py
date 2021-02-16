@@ -5,6 +5,11 @@ import torch
 import numpy as np
 from collections import deque
 import gym.wrappers
+from models.vae import VAE
+from models.mdrnn import MDRNNCell
+from os.path import join, exists
+
+
 
 def mkdir(base, name):
     """
@@ -76,15 +81,48 @@ def create_memory(env, agent, memory, steps, config, episodes=100):
     average_score = 0
     average_steps = 0
     agent.eval()
+    
+    LSIZE = 200
+    ASIZE = 1
+    RSIZE = 256
+    mdir = "15.02_l200_RGB"
+    m = ""
+    vae_file, rnn_file = [join(mdir, m, 'best.tar') for m in ['vae', 'mdrnn']]
+    vae_state, rnn_state = [
+            torch.load(fname, map_location={'cuda:0': str(config["device"])})
+            for fname in (vae_file, rnn_file)]
+    for m, s in (('VAE', vae_state), ('MDRNN', rnn_state)):
+        print("Loading {} at epoch {} "
+                "with test loss {}".format(
+                    m, s['epoch'], s['precision']))
+
+    vae = VAE(3, LSIZE).to(config["device"])
+    vae.load_state_dict(vae_state['state_dict'])
+    mdrnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(config["device"])
+    mdrnn.load_state_dict(
+            {k.strip('_l0'): v for k, v in rnn_state['state_dict'].items()})
     for i in range(episodes):
         # env = gym.wrappers.Monitor(env,str(config["locexp"])+"/vid/{}/{}".format(steps, i), video_callable=lambda episode_id: True,force=True)
         env.seed(i)
         state, obs = env.reset("mediumClassic")
         episode_reward = 0
         index = memory.idx
+        hidden = [torch.zeros(1, RSIZE).to(config["device"]) for _ in range(2)]
         for t in range(125):
             state_tensor = state.clone().detach().type(torch.cuda.FloatTensor).div_(255)
             action = agent.act(state_tensor)
+            action_rnn = torch.as_tensor(action, device=config["device"]).type(torch.int).unsqueeze(0).unsqueeze(0)
+            print(action_rnn)
+            print(action_rnn.shape)
+            states = np.swapaxes(obs, 2, -3)
+            states = torch.as_tensor(states, device=config["device"]).unsqueeze(0)
+            states = states.type(torch.float32).div_(255)
+            _, latent_mu, _ = vae(states)
+            print(latent_mu.shape)
+            _, _, _, _, _, next_hidden = mdrnn(action_rnn, latent_mu, hidden)
+            print(len(next_hidden))
+            print(next_hidden[0].shape)
+            sys.exit()
             next_state, reward, done, next_obs = env.step(action)
             if t != 124:
                 done_no_max = done
@@ -97,6 +135,7 @@ def create_memory(env, agent, memory, steps, config, episodes=100):
                 memory.save_memory(path)
                 if memory.idx >= steps:
                     return
+            hidden = next_hidden
             state = next_state
             obs = next_obs
             score += reward

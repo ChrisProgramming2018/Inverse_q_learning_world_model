@@ -9,7 +9,7 @@ from train import train_agent
 from framestack import FrameStack
 import gym_pacman
 from utils import time_format, eval_policy, mkdir, create_memory
-from replay_buffer import ReplayBuffer
+from replay_buffer_wm import ReplayBufferWM
 from agent import Agent
 
 def main(args):
@@ -34,8 +34,8 @@ def main(args):
     pathname = args.model_path
     tensorboard_name = 'eval_agents' + '/runs/' + pathname
     writer = SummaryWriter(tensorboard_name)
-    memory =  ReplayBuffer((64, 64, 3), (1,), 50000, "cuda")
-    memory.load_memory("pacman_expert_memory-38000")
+    memory =  ReplayBufferWM((64, 64, 3), (1,), 50000, "cuda")
+    # memory.load_memory("pacman_expert_memory-38000")
     T = 49999  
     create_memory(env, agent, memory, T, param)
 
